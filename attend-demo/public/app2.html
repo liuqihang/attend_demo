@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>打卡 · 打卡服务</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="hero">
+    <h1>liuxiangqiuying · 打卡服务</h1>
+    <p>采用 WGS84 坐标系 · 服务端代理 Basic Auth · 经纬度密文 locationEncrypt 自动生成</p>
+  </div>
+
+  <!-- ==================== 登录态 ==================== -->
+  <div class="card">
+    <div class="card-head">
+      <div class="badge">✓</div>
+      <h2>已登录<span class="sub">未登录无法进入本页</span></h2>
+      <div class="head-right"><span class="pill ok">登录成功</span></div>
+    </div>
+    <div class="session-bar">
+      <span class="who">手机号 <b id="whoPhone">—</b></span>
+      <span class="who">tbUuid <b id="whoUuid">—</b></span>
+      <button class="ghost small" id="logoutBtn" style="margin-left:auto">退出登录</button>
+    </div>
+  </div>
+
+  <!-- ==================== 步骤 2 ==================== -->
+  <div class="card">
+    <div class="card-head">
+      <div class="badge">2</div>
+      <h2>选择打卡坐标<span class="sub">选定后自动生成 locationEncrypt</span></h2>
+      <div class="head-right"><span class="pill" id="encStatus">待选坐标</span></div>
+    </div>
+
+    <div class="seg">
+      <label><input type="radio" name="mode" value="map" checked><span>地图选点</span></label>
+      <label><input type="radio" name="mode" value="offline"><span>手动输入</span></label>
+      <label><input type="radio" name="mode" value="pool"><span>坐标池随机</span></label>
+    </div>
+
+    <!-- 地图选点 -->
+    <div id="modeMap">
+      <div id="map"></div>
+      <div class="map-tip">点击地图选点。蓝圈为圆心 500 米参考范围，坐标为 WGS84（OpenStreetMap 底图）。</div>
+    </div>
+
+    <!-- 手动输入 -->
+    <div id="modeOffline" style="display:none">
+      <div class="row">
+        <div><label>纬度 lat</label><input type="text" id="offlineLat" value="30.494585"></div>
+        <div><label>经度 lng</label><input type="text" id="offlineLng" value="114.381391"></div>
+      </div>
+      <div class="hint">无网络环境下可直接输入经纬度</div>
+    </div>
+
+    <!-- 坐标池随机 -->
+    <div id="modePool" style="display:none">
+      <label>坐标列表（每行一个：纬度,经度）</label>
+      <textarea id="poolText" rows="6">30.497322,114.383363
+30.495709,114.381188
+30.497739,114.382894
+30.495742,114.381418
+30.496356,114.382837
+30.495464,114.382575
+30.495660,114.382404
+30.497503,114.383414
+30.495645,114.381190
+30.495689,114.381406
+30.496455,114.382773
+30.496317,114.382588
+30.495797,114.382393
+30.497443,114.383515
+30.495993,114.382812
+30.496469,114.382813
+30.495759,114.382783
+30.496639,114.382918
+30.495381,114.382671
+30.495803,114.382446
+30.495769,114.382358
+30.495530,114.382049
+30.494988,114.381542
+30.496588,114.382872
+30.495858,114.382492
+30.495632,114.382232
+30.495798,114.382367
+30.496291,114.382811
+30.498039,114.383606
+30.495644,114.382207
+30.496553,114.382979
+30.495597,114.382660
+30.495638,114.382788
+30.495767,114.381285
+30.496362,114.382656
+30.496393,114.382665
+30.495000,114.381521
+30.498176,114.383754
+30.495430,114.382164
+30.496027,114.382562
+30.495745,114.382646
+30.495658,114.381661
+30.496323,114.382809
+30.495732,114.382728
+30.498233,114.383526
+30.495567,114.382719
+30.496593,114.382850</textarea>
+      <div class="actions">
+        <button class="ghost" id="randBtn">随机抽取一个</button>
+      </div>
+    </div>
+
+    <label>最终使用坐标（只读）</label>
+    <div class="coord-grid">
+      <div class="coord-box"><div class="cap">纬度 lat</div><div class="val empty" id="finalLat">—</div></div>
+      <div class="coord-box"><div class="cap">经度 lng</div><div class="val empty" id="finalLng">—</div></div>
+    </div>
+
+    <!-- 自动生成的加密结果 -->
+    <div class="enc-box" id="encryptBox" style="display:none">
+      <div class="title">locationEncrypt 已自动生成</div>
+      <div class="kv"><span class="kk">AES key/iv</span><span class="vv" id="encKey"></span></div>
+      <div class="kv"><span class="kk">明文内容</span><span class="vv" id="encContent"></span></div>
+      <div class="kv"><span class="kk">locationEncrypt</span><span class="vv" id="encValue"></span></div>
+    </div>
+  </div>
+
+  <!-- ==================== 步骤 3 ==================== -->
+  <div class="card">
+    <div class="card-head">
+      <div class="badge">3</div>
+      <h2>提交打卡<span class="sub">参数可编辑，locationEncrypt 自动生成</span></h2>
+    </div>
+
+    <div class="param-head">
+      <label style="margin:0">打卡请求参数</label>
+      <button class="ghost small" id="editParamsBtn">编辑参数</button>
+    </div>
+    <pre id="attendBody"></pre>
+
+    <div id="paramEditArea" style="display:none">
+      <textarea id="attendBodyEdit" rows="16" spellcheck="false"></textarea>
+      <div class="actions" style="margin-top:10px">
+        <button class="small" id="saveParamsBtn">保存参数</button>
+        <button class="ghost small" id="cancelParamsBtn">取消</button>
+        <button class="ghost small" id="resetParamsBtn">恢复默认</button>
+      </div>
+      <div class="hint">locationEncrypt 由所选坐标自动生成，编辑时保存也会以当前值为准。</div>
+    </div>
+
+    <div class="actions">
+      <button id="attendBtn">提交打卡</button>
+      <span class="hint warn flex-fill">若接口返回 401，请在 server.js 把 TOKEN_PREFIX 改为 'bearer '</span>
+    </div>
+
+    <label>打卡返回结果</label>
+    <pre id="attendResult">（未打卡）</pre>
+  </div>
+
+</div>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+
+  // 与 login.html 约定的登录信息键名
+  const STORAGE_KEY = 'lxqy_login';
+
+  // ==================== 登录态校验：未登录直接踢回登录页 ====================
+  let session = null;
+  try { session = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || 'null'); } catch (e) { session = null; }
+
+  const loginData = (session && session.data) || null;
+  if (!loginData || !loginData.accessToken) {
+    location.replace('login.html');
+  }
+
+  (function boot() {
+    if (!loginData || !loginData.accessToken) return;   // 已在跳转登录页，不再初始化
+
+    // ==================== 状态 ====================
+    let locationEncrypt = '';      // 自动生成的密文
+    let finalLat = '', finalLng = '';
+
+    // 打卡固定参数（locationEncrypt 由坐标生成，其余固定）
+    const FIXED_ATTEND_BODY = {
+      accountNo: 'liuxiangqiuying.1ih',
+      attendPlaceName: '中国湖北省武汉市洪山区关山街道楚平路',
+      city: '武汉市',
+      deviceVo: {
+        identifyNo: '',
+        mobileId: '202605280053134368150900998034823959862621898391',
+        mobileSys: '26.5.2',
+        mobileType: 'iPhone 17 Pro',
+        warnType: 0,
+      },
+      employeeType: '01',
+      lastDayFlag: 0,
+      locationEncrypt: '',
+      orgNo: 'JXJK001625',
+      tbUuid: '6d5e4298294e414f916e9a495baf0e46',
+      userName: '刘向秋莹',
+    };
+
+    // 打卡参数基线（可通过「编辑参数」修改，locationEncrypt 始终自动生成）
+    let attendBase = JSON.parse(JSON.stringify(FIXED_ATTEND_BODY));
+
+    function currentAttendBody() {
+      return {
+        ...attendBase,
+        locationEncrypt: locationEncrypt || '<待生成>',
+      };
+    }
+
+    function renderAttendBody() {
+      $('attendBody').textContent = JSON.stringify(currentAttendBody(), null, 2);
+    }
+
+    function setStatus(el, type, text) {
+      el.className = 'pill ' + (type || '');
+      el.textContent = text;
+    }
+
+    // ==================== 登录态展示 / 退出 ====================
+    const u = loginData.userLoginInfoVo || {};
+    $('whoPhone').textContent = (session && session.phone) || '—';
+    $('whoUuid').textContent = u.tbUuid ? String(u.tbUuid).slice(0, 8) + '…' : '—';
+
+    $('logoutBtn').onclick = () => {
+      sessionStorage.removeItem(STORAGE_KEY);
+      location.replace('login.html');
+    };
+
+    // ==================== 参数编辑 ====================
+    $('editParamsBtn').onclick = () => {
+      $('attendBodyEdit').value = JSON.stringify(attendBase, null, 2);
+      $('attendBody').style.display = 'none';
+      $('paramEditArea').style.display = 'block';
+      $('editParamsBtn').disabled = true;
+      $('editParamsBtn').textContent = '编辑中…';
+    };
+
+    $('saveParamsBtn').onclick = () => {
+      let parsed;
+      try {
+        parsed = JSON.parse($('attendBodyEdit').value);
+      } catch (e) {
+        return alert('JSON 格式错误，无法保存：' + e.message);
+      }
+      delete parsed.locationEncrypt;   // locationEncrypt 由所选坐标自动生成
+      attendBase = parsed;
+      closeParamEdit();
+    };
+
+    $('cancelParamsBtn').onclick = closeParamEdit;
+
+    $('resetParamsBtn').onclick = () => {
+      attendBase = JSON.parse(JSON.stringify(FIXED_ATTEND_BODY));
+      $('attendBodyEdit').value = JSON.stringify(attendBase, null, 2);
+    };
+
+    function closeParamEdit() {
+      $('paramEditArea').style.display = 'none';
+      $('attendBody').style.display = 'block';
+      $('editParamsBtn').disabled = false;
+      $('editParamsBtn').textContent = '编辑参数';
+      renderAttendBody();
+    }
+
+    // ==================== 步骤2：坐标选择 ====================
+    const MODES = { map: 'modeMap', offline: 'modeOffline', pool: 'modePool' };
+
+    document.querySelectorAll('input[name=mode]').forEach((r) => {
+      r.onchange = () => {
+        Object.values(MODES).forEach((id) => ($(id).style.display = 'none'));
+        $(MODES[r.value]).style.display = 'block';
+        if (r.value === 'map') setTimeout(() => map.invalidateSize(), 60);
+      };
+    });
+
+    function setFinal(lat, lng) {
+      finalLat = String(lat || '').trim();
+      finalLng = String(lng || '').trim();
+      const la = $('finalLat'), ln = $('finalLng');
+      la.textContent = finalLat || '—';
+      ln.textContent = finalLng || '—';
+      la.classList.toggle('empty', !finalLat);
+      ln.classList.toggle('empty', !finalLng);
+      locationEncrypt = '';      // 坐标变化 → 旧密文失效
+      renderAttendBody();
+      scheduleEncrypt();
+    }
+
+    // ---- 地图选点（Leaflet + OSM 瓦片，坐标系 WGS84）----
+    const CENTER = [30.494585, 114.381391];
+    const map = L.map('map').setView(CENTER, 16);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+    L.circle(CENTER, { radius: 500, color: '#1677ff', fillOpacity: 0.08 }).addTo(map);
+    L.marker(CENTER).addTo(map).bindPopup('参考圆心');
+
+    let pickMarker = null;
+    map.on('click', (e) => {
+      const { lat, lng } = e.latlng;
+      if (pickMarker) map.removeLayer(pickMarker);
+      pickMarker = L.circleMarker([lat, lng], {
+        radius: 8, color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.75,
+      }).addTo(map);
+      setFinal(lat.toFixed(6), lng.toFixed(6));
+    });
+
+    // ---- 手动输入 ----
+    $('offlineLat').oninput = $('offlineLng').oninput = () => {
+      setFinal($('offlineLat').value, $('offlineLng').value);
+    };
+
+    // ---- 坐标池随机 ----
+    $('randBtn').onclick = () => {
+      const lines = $('poolText').value.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (!lines.length) return alert('坐标池为空');
+      const [lat, lng] = lines[Math.floor(Math.random() * lines.length)].split(',').map((s) => s.trim());
+      setFinal(lat, lng);
+    };
+
+    // ==================== locationEncrypt 自动生成 ====================
+    let encTimer = null;
+
+    function scheduleEncrypt() {
+      clearTimeout(encTimer);
+      if (!finalLat || !finalLng) {
+        $('encryptBox').style.display = 'none';
+        return setStatus($('encStatus'), '', '待选坐标');
+      }
+      setStatus($('encStatus'), 'busy', '加密中…');
+      encTimer = setTimeout(doEncrypt, 120);
+    }
+
+    async function doEncrypt() {
+      try {
+        const r = await fetch('api/encryptLocation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessToken: loginData.accessToken,
+            tbUuid: u.tbUuid,
+            lat: finalLat, lng: finalLng,
+          }),
+        });
+        const json = await r.json();
+        if (!json.locationEncrypt) {
+          $('encryptBox').style.display = 'none';
+          return setStatus($('encStatus'), 'err', '生成失败');
+        }
+        locationEncrypt = json.locationEncrypt;
+        $('encKey').textContent = json.key;
+        $('encContent').textContent = json.content;
+        $('encValue').textContent = json.locationEncrypt;
+        $('encryptBox').style.display = 'block';
+        setStatus($('encStatus'), 'ok', '已生成');
+        renderAttendBody();
+      } catch (e) {
+        $('encryptBox').style.display = 'none';
+        setStatus($('encStatus'), 'err', '加密异常');
+      }
+    }
+
+    // ==================== 步骤3：打卡 ====================
+    $('attendBtn').onclick = async () => {
+      if (!locationEncrypt) return alert('请先选择坐标以生成 locationEncrypt');
+
+      const body = currentAttendBody();
+      $('attendResult').textContent = '提交中…';
+      try {
+        const r = await fetch('api/attend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ accessToken: loginData.accessToken, body }),
+        });
+        $('attendResult').textContent =
+          '【addAppAttendRecord】\n' + JSON.stringify(await r.json(), null, 2);
+      } catch (e) {
+        $('attendResult').textContent = '请求异常：' + e.message;
+      }
+    };
+
+    // 初始渲染
+    renderAttendBody();
+  })();
+</script>
+</body>
+</html>

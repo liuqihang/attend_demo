@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>手机打卡 Demo</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: "Microsoft YaHei", sans-serif; background: #f0f2f5; padding: 16px; }
+    .step {
+      background: #fff; border-radius: 8px; padding: 16px 18px;
+      margin-bottom: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+    }
+    .step h3 { font-size: 15px; margin-bottom: 12px; color: #1677ff; }
+    input, textarea, button { font-size: 13px; font-family: inherit; }
+    input[type=text], input[type=number], textarea {
+      width: 100%; padding: 7px 10px; border: 1px solid #d9d9d9;
+      border-radius: 4px; margin-bottom: 8px;
+    }
+    textarea { font-family: Consolas, monospace; resize: vertical; }
+    button {
+      padding: 7px 18px; border: none; border-radius: 4px;
+      background: #1677ff; color: #fff; cursor: pointer; margin-right: 8px;
+    }
+    button:hover { background: #4096ff; }
+    button:disabled { background: #b0c4de; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; }
+    .row > * { flex: 1; }
+    pre {
+      background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 4px;
+      padding: 10px; font-size: 12px; max-height: 260px; overflow: auto;
+      white-space: pre-wrap; word-break: break-all; margin-top: 8px;
+    }
+    label { font-size: 13px; color: #555; display: block; margin: 4px 0 2px; }
+    #map { height: 320px; border-radius: 4px; border: 1px solid #d9d9d9; margin-bottom: 8px; }
+    .radio-row { display: flex; gap: 20px; margin-bottom: 10px; }
+    .radio-row label { display: flex; align-items: center; gap: 4px; margin: 0; cursor: pointer; }
+    .info { font-size: 12px; color: #888; }
+    #pickedInfo { font-family: Consolas, monospace; font-size: 12px; color: #333; margin-bottom: 8px; }
+    .warn { color: #d4380d; }
+  </style>
+</head>
+<body>
+
+  <!-- 步骤1：获取验证码 + 登录 -->
+  <div class="step">
+    <h3>1. 获取验证码 / 登录（接口1、接口2，服务端内置 Basic Auth）</h3>
+    <label>手机号</label>
+    <div class="row">
+      <input type="text" id="phone" placeholder="如 15926217640" style="flex:2">
+      <button id="smsBtn" style="flex:1">获取验证码</button>
+    </div>
+    <label>手机验证码</label>
+    <input type="text" id="phoneCode" placeholder="收到的 6 位验证码">
+    <button id="loginBtn">登录</button>
+    <pre id="loginResult">（未登录）</pre>
+  </div>
+
+  <!-- 步骤2：选择打卡坐标 -->
+  <div class="step">
+    <h3>2. 选择打卡坐标</h3>
+    <div class="radio-row">
+      <label><input type="radio" name="mode" value="map" checked> 方式一：地图选点（WGS84 坐标系，需外网加载 OSM 瓦片）</label>
+      <label><input type="radio" name="mode" value="offline"> 方式一·离线：手动输入经纬度</label>
+      <label><input type="radio" name="mode" value="pool"> 方式二：坐标池随机抽取</label>
+    </div>
+
+    <!-- 地图选点 -->
+    <div id="modeMap">
+      <div id="map"></div>
+      <div id="pickedInfo">点击地图选点（初始圆心 30.494585, 114.381391，蓝圈为 500 米参考范围；坐标为 WGS84）</div>
+    </div>
+
+    <!-- 离线手动输入 -->
+    <div id="modeOffline" style="display:none">
+      <div class="row">
+        <div><label>纬度 lat</label><input type="text" id="offlineLat" value="30.494585"></div>
+        <div><label>经度 lng</label><input type="text" id="offlineLng" value="114.381391"></div>
+      </div>
+      <div class="info">无网络环境下直接输入经纬度即可</div>
+    </div>
+
+    <!-- 坐标池随机 -->
+    <div id="modePool" style="display:none">
+      <label>坐标列表（每行一个：纬度,经度）</label>
+      <textarea id="poolText" rows="5">30.497322,114.383363
+30.495709,114.381188
+30.497739,114.382894
+30.495742,114.381418
+30.496356,114.382837
+30.495464,114.382575
+30.495660,114.382404
+30.497503,114.383414
+30.495645,114.381190
+30.495689,114.381406
+30.496455,114.382773
+30.496317,114.382588
+30.495797,114.382393
+30.497443,114.383515
+30.495993,114.382812
+30.496469,114.382813
+30.495759,114.382783
+30.496639,114.382918
+30.495381,114.382671
+30.495803,114.382446
+30.495769,114.382358
+30.495530,114.382049
+30.494988,114.381542
+30.494988,114.381542
+30.496588,114.382872
+30.495858,114.382492
+30.495632,114.382232
+30.495798,114.382367
+30.496291,114.382811
+30.498039,114.383606
+30.495644,114.382207
+30.496553,114.382979
+30.496553,114.382979
+30.495597,114.382660
+30.495638,114.382788
+30.495767,114.381285
+30.496362,114.382656
+30.496393,114.382665
+30.495000,114.381521
+30.495000,114.381521
+30.498176,114.383754
+30.495430,114.382164
+30.496027,114.382562
+30.495745,114.382646
+30.495658,114.381661
+30.496323,114.382809
+30.495732,114.382728
+30.498233,114.383526
+30.495567,114.382719
+30.496593,114.382850</textarea>
+      <button id="randBtn">随机抽取一个</button>
+    </div>
+
+    <label>最终使用坐标</label>
+    <div class="row">
+      <input type="text" id="finalLat" placeholder="纬度" readonly>
+      <input type="text" id="finalLng" placeholder="经度" readonly>
+    </div>
+  </div>
+
+  <!-- 步骤3：生成 locationEncrypt -->
+  <div class="step">
+    <h3>3. 生成 locationEncrypt（AES256Util.encode：key=iv="s@_xtbg!"+token后4位+tbUuid后4位）</h3>
+    <button id="encryptBtn">生成 locationEncrypt</button>
+    <pre id="encryptResult">（未生成）</pre>
+  </div>
+
+  <!-- 步骤4：打卡参数 + 提交 -->
+  <div class="step">
+    <h3>4. 打卡（接口3，参数固定，仅 locationEncrypt 为上一步生成结果）</h3>
+    <label>打卡请求参数（固定，仅 locationEncrypt 为变量）</label>
+    <pre id="attendBody">（生成 locationEncrypt 后自动填充）</pre>
+    <button id="attendBtn">提交打卡</button>
+    <span class="info warn">接口3 Header 的 Authorization 默认直接放 accessToken；若 401 请在 server.js 把 TOKEN_PREFIX 改为 'bearer '</span>
+    <pre id="attendResult">（未打卡）</pre>
+  </div>
+
+  <script>
+    // ==================== 状态 ====================
+    let loginData = null; // 接口2返回的 data
+
+    // 打卡固定参数（按 lxqy.md 示例，仅 locationEncrypt 为变量）
+    const FIXED_ATTEND_BODY = {
+      accountNo: 'liuxiangqiuying.1ih',
+      attendPlaceName: '中国湖北省武汉市洪山区关山街道楚平路',
+      employeeType: '01',
+      locationEncrypt: '',
+      orgNo: 'JXJK001625',
+      tbUuid: '6d5e4298294e414f916e9a495baf0e46',
+      city: '武汉市',
+      deviceVo: {
+        identifyNo: '',
+        mobileId: '202503050914220679606652716367392409474070381149',
+        mobileSys: '26.6.2',
+        mobileType: 'iPhone 15 Plus',
+        warnType: 0,
+      },
+    };
+
+    function renderAttendBody(locationEncrypt) {
+      const body = { ...FIXED_ATTEND_BODY, locationEncrypt: locationEncrypt || '<待加密生成>' };
+      $('attendBody').textContent = JSON.stringify(body, null, 2);
+    }
+
+    const $ = (id) => document.getElementById(id);
+
+    // ==================== 步骤1 ====================
+    $('smsBtn').onclick = async () => {
+      const phone = $('phone').value.trim();
+      if (!phone) return alert('请输入手机号');
+      const r = await fetch('/api/getSmsCode?username=' + encodeURIComponent(phone));
+      $('loginResult').textContent = '【getSmsCode】\n' + JSON.stringify(await r.json(), null, 2);
+    };
+
+    $('loginBtn').onclick = async () => {
+      const phone = $('phone').value.trim();
+      const phoneCode = $('phoneCode').value.trim();
+      if (!phone || !phoneCode) return alert('请输入手机号和验证码');
+      const r = await fetch('/api/loginBySmsCode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, phoneCode, username: phone }),
+      });
+      const json = await r.json();
+      $('loginResult').textContent = '【loginBySmsCode】\n' + JSON.stringify(json, null, 2);
+      if (json.body && json.body.success) {
+        loginData = json.body.data;
+      }
+    };
+
+    // ==================== 步骤2：方式切换 ====================
+    const MODES = { map: 'modeMap', offline: 'modeOffline', pool: 'modePool' };
+    document.querySelectorAll('input[name=mode]').forEach((r) => {
+      r.onchange = () => {
+        Object.values(MODES).forEach((id) => ($(id).style.display = 'none'));
+        $(MODES[r.value]).style.display = 'block';
+      };
+    });
+
+    function setFinal(lat, lng) {
+      $('finalLat').value = lat;
+      $('finalLng').value = lng;
+    }
+
+    // ---- 地图选点（Leaflet + OSM 瓦片，坐标系 WGS84）----
+    const CENTER = [30.494585, 114.381391];
+    const map = L.map('map').setView(CENTER, 16);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap contributors',
+    }).addTo(map);
+    L.circle(CENTER, { radius: 500, color: '#1677ff', fillOpacity: 0.08 }).addTo(map);
+    L.marker(CENTER).addTo(map).bindPopup('参考圆心');
+
+    let pickMarker = null;
+    map.on('click', (e) => {
+      const { lat, lng } = e.latlng;
+      if (pickMarker) map.removeLayer(pickMarker);
+      pickMarker = L.circleMarker([lat, lng], {
+        radius: 8, color: '#d4380d', fillColor: '#d4380d', fillOpacity: 0.7,
+      }).addTo(map);
+      $('pickedInfo').textContent = `已选：${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      setFinal(lat.toFixed(6), lng.toFixed(6));
+    });
+
+    // ---- 离线手动输入 ----
+    $('offlineLat').oninput = $('offlineLng').oninput = () => {
+      setFinal($('offlineLat').value.trim(), $('offlineLng').value.trim());
+    };
+
+    // ---- 坐标池随机 ----
+    $('randBtn').onclick = () => {
+      const lines = $('poolText').value.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (!lines.length) return alert('坐标池为空');
+      const [lat, lng] = lines[Math.floor(Math.random() * lines.length)].split(',').map((s) => s.trim());
+      setFinal(lat, lng);
+      alert('抽取结果：' + lat + ', ' + lng);
+    };
+
+    // ==================== 步骤3：生成 locationEncrypt ====================
+    let locationEncrypt = '';
+
+    $('encryptBtn').onclick = async () => {
+      if (!loginData) return alert('请先登录');
+      const lat = $('finalLat').value.trim();
+      const lng = $('finalLng').value.trim();
+      if (!lat || !lng) return alert('请先选择坐标');
+
+      const r = await fetch('/api/encryptLocation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessToken: loginData.accessToken,
+          tbUuid: loginData.userLoginInfoVo.tbUuid,
+          lat, lng,
+        }),
+      });
+      const json = await r.json();
+      if (!json.locationEncrypt) {
+        $('encryptResult').textContent = '加密失败：' + JSON.stringify(json, null, 2);
+        return;
+      }
+      locationEncrypt = json.locationEncrypt;
+      $('encryptResult').textContent =
+        `key     = ${json.key}\n` +
+        `content = ${json.content}\n` +
+        `locationEncrypt = ${json.locationEncrypt}`;
+      renderAttendBody(locationEncrypt);
+    };
+
+    // ==================== 步骤4：打卡 ====================
+    $('attendBtn').onclick = async () => {
+      if (!loginData) return alert('请先登录');
+      if (!locationEncrypt) return alert('请先生成 locationEncrypt');
+
+      // 组装打卡请求体（示例参数不变，仅 locationEncrypt 动态生成）
+      const body = { ...FIXED_ATTEND_BODY, locationEncrypt };
+
+      const r = await fetch('/api/attend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessToken: loginData.accessToken, body }),
+      });
+      $('attendResult').textContent =
+        '【addAppAttendRecord】\n' + JSON.stringify(await r.json(), null, 2);
+    };
+
+    // 初始渲染固定参数
+    renderAttendBody();
+  </script>
+</body>
+</html>

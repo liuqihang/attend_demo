@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>RSA 加密登录 Demo</title>
+  <!-- JSEncrypt：浏览器端 RSA 加密，PKCS1Padding，与 Hutool 后端兼容 -->
+  <script src="https://cdn.jsdelivr.net/npm/jsencrypt@3.3.2/bin/jsencrypt.min.js"></script>
+</head>
+<body>
+  <h2>RSA 加密登录 Demo</h2>
+  <div>
+    <input id="username" placeholder="用户名">
+    <input id="password" type="password" placeholder="密码">
+    <input id="validCode" placeholder="验证码">
+    <img id="captchaImg" alt="验证码" title="点击刷新" style="cursor:pointer">
+    <button id="loginBtn">登录</button>
+  </div>
+  <pre id="log"></pre>
+
+  <script>
+    const BASE_URL = 'http://localhost:8080';
+    const CAPTCHA_API = '/oauth/getEncryptCaptchaInfo'; // 按实际修改
+    const LOGIN_API = '/oauth/loginByCaptchaEncrypt';   // 按实际修改
+
+    let captchaKey = '';
+    let publicKeyBase64 = '';
+
+    function log(...args) {
+      document.getElementById('log').textContent += args.join(' ') + '\n';
+    }
+
+    // 1. 获取验证码 + 公钥 + captchaKey
+    async function loadCaptcha() {
+      const res = await fetch(BASE_URL + CAPTCHA_API);
+      const json = await res.json();
+      const data = json.data; // 按后端实际响应结构调整
+
+      captchaKey = data.captchaKey;
+      publicKeyBase64 = data.encryptKey;
+
+      // imageBase64 若为纯 Base64 图片数据，加前缀展示
+      document.getElementById('captchaImg').src =
+        'data:image/png;base64,' + data.imageBase64;
+
+      log('captchaKey:', captchaKey);
+      log('encryptKey:', publicKeyBase64);
+    }
+
+    // 2. RSA 公钥加密（JSEncrypt 默认 RSA/ECB/PKCS1Padding，与 Hutool 一致）
+    function encryptPassword(plain) {
+      const encryptor = new JSEncrypt();
+      encryptor.setPublicKey(publicKeyBase64); // 直接传 Base64，JSEncrypt 会自动包裹 PEM 头
+      const encrypted = encryptor.encrypt(plain);
+      if (!encrypted) throw new Error('RSA 加密失败');
+      return encrypted; // 已是 Base64 密文
+    }
+
+    // 3. 登录
+    async function login() {
+      const encryptedPassword = encryptPassword(
+        document.getElementById('password').value
+      );
+      log('加密后密码:', encryptedPassword);
+
+      const body = new URLSearchParams({
+        captchaKey,
+        validCode: document.getElementById('validCode').value,
+        username: document.getElementById('username').value,
+        password: encryptedPassword,
+      });
+
+      const res = await fetch(BASE_URL + LOGIN_API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+      const json = await res.json();
+      log('登录结果:', JSON.stringify(json));
+
+      if (!json.success) loadCaptcha(); // 失败（如验证码过期）时刷新，因为后端取一次就删缓存
+    }
+
+    document.getElementById('captchaImg').onclick = loadCaptcha;
+    document.getElementById('loginBtn').onclick = login;
+    loadCaptcha();
+  </script>
+</body>
+</html>

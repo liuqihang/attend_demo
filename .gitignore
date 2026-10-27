@@ -1,0 +1,11 @@
+# 依赖
+node_modules/
+
+# 运行日志（本地生成）
+*.log
+attend-demo/app.log
+attend-demo/app_no_phone.log
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
