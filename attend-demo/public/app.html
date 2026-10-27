@@ -432,24 +432,95 @@
     $('toggleLogin').textContent = hidden ? '显示登录返回信息' : '隐藏登录返回信息';
   };
 
+  // ---- 获取验证码：60 秒倒计时，倒计时内按钮不可点（刷新页面继续计时）----
+  const SMS_CD_KEY = 'lxqy_sms_countdown';
+  const SMS_CD_SECONDS = 60;
+  let smsSending = false;    // 请求进行中，防重复提交
+  let smsTimer = null;
+
+  function smsLeftSeconds() {
+    const phone = $('phone').value.trim();
+    try {
+      const o = JSON.parse(localStorage.getItem(SMS_CD_KEY) || 'null');
+      if (!o || o.phone !== phone) return 0;
+      return Math.max(0, Math.ceil((o.end - Date.now()) / 1000));
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // 按当前状态刷新按钮（倒计时中 > 请求中 > 可点击）
+  function renderSmsBtn() {
+    const left = smsLeftSeconds();
+    if (left > 0) {
+      $('smsBtn').disabled = true;
+      $('smsBtn').textContent = left + 's 后可重试';
+      return true;
+    }
+    if (smsTimer) { clearInterval(smsTimer); smsTimer = null; }
+    $('smsBtn').disabled = smsSending;
+    $('smsBtn').textContent = smsSending ? '发送中…' : '获取验证码';
+    return false;
+  }
+
+  function startSmsCountdown(phone) {
+    localStorage.setItem(SMS_CD_KEY, JSON.stringify({ phone, end: Date.now() + SMS_CD_SECONDS * 1000 }));
+    if (smsTimer) clearInterval(smsTimer);
+    smsTimer = setInterval(() => { if (!renderSmsBtn()) clearInterval(smsTimer); }, 500);
+    renderSmsBtn();
+  }
+
+  // 发送失败时释放倒计时，允许马上重试
+  function clearSmsCountdown() {
+    localStorage.removeItem(SMS_CD_KEY);
+    if (smsTimer) { clearInterval(smsTimer); smsTimer = null; }
+    renderSmsBtn();
+  }
+
+  $('phone').oninput = renderSmsBtn;
+  renderSmsBtn();
+
   $('smsBtn').onclick = async () => {
+    if (smsSending) return;            // 防重复提交
+    if (smsLeftSeconds() > 0) return;  // 倒计时中不可点
+
     const phone = $('phone').value.trim();
     if (!phone) return alert('请输入手机号');
+
+    smsSending = true;
+    renderSmsBtn();
+    setStatus($('loginStatus'), 'busy', '请求中…');
     try {
       const r = await fetch('api/getSmsCode?username=' + encodeURIComponent(phone));
       const json = await r.json();
       $('loginResult').textContent = '【getSmsCode】\n' + JSON.stringify(json, null, 2);
-      setStatus($('loginStatus'), 'busy', '验证码已请求');
+      if (json.body && json.body.success) {
+        setStatus($('loginStatus'), 'ok', '验证码已发送');
+        startSmsCountdown(phone);
+      } else {
+        setStatus($('loginStatus'), 'err', '获取失败');
+      }
     } catch (e) {
       $('loginResult').textContent = '请求异常：' + e.message;
       setStatus($('loginStatus'), 'err', '请求失败');
     }
+    smsSending = false;
+    if (smsLeftSeconds() === 0) clearSmsCountdown(); else renderSmsBtn();
   };
 
+  // ---- 登录（请求未返回前禁止重复提交）----
+  let loggingIn = false;
+
   $('loginBtn').onclick = async () => {
+    if (loggingIn) return;             // 防重复提交
+
     const phone = $('phone').value.trim();
     const phoneCode = $('phoneCode').value.trim();
     if (!phone || !phoneCode) return alert('请输入手机号和验证码');
+
+    loggingIn = true;
+    $('loginBtn').disabled = true;
+    $('loginBtn').textContent = '登录中…';
     setStatus($('loginStatus'), 'busy', '登录中…');
     try {
       const r = await fetch('api/loginBySmsCode', {
@@ -472,6 +543,11 @@
       setLoggedIn(null);
       setStatus($('loginStatus'), 'err', '登录异常');
     }
+
+    // 恢复按钮：期间由 loggingIn 拦截重复点击
+    loggingIn = false;
+    $('loginBtn').disabled = false;
+    $('loginBtn').textContent = '登 录';
   };
 
   // ==================== 步骤2：坐标选择 ====================
@@ -578,9 +654,16 @@
   }
 
   // ==================== 步骤3：打卡 ====================
+  let submitting = false;   // 请求未返回前禁止重复提交
+
   $('attendBtn').onclick = async () => {
+    if (submitting) return;
     if (!loginData) return alert('请先登录');
     if (!locationEncrypt) return alert('请先选择坐标以生成 locationEncrypt');
+
+    submitting = true;
+    $('attendBtn').disabled = true;
+    $('attendBtn').textContent = '提交中…';
 
     const body = currentAttendBody();
     $('attendResult').textContent = '提交中…';
@@ -595,6 +678,9 @@
     } catch (e) {
       $('attendResult').textContent = '请求异常：' + e.message;
     }
+    submitting = false;
+    $('attendBtn').disabled = !loginData;
+    $('attendBtn').textContent = '提交打卡';
   };
 
   // 初始渲染

@@ -369,8 +369,15 @@
     }
 
     // ==================== 步骤3：打卡 ====================
+    let submitting = false;   // 请求未返回前禁止重复提交
+
     $('attendBtn').onclick = async () => {
+      if (submitting) return;
       if (!locationEncrypt) return alert('请先选择坐标以生成 locationEncrypt');
+
+      submitting = true;
+      $('attendBtn').disabled = true;
+      $('attendBtn').textContent = '提交中…';
 
       const body = currentAttendBody();
       $('attendResult').textContent = '提交中…';
@@ -385,6 +392,9 @@
       } catch (e) {
         $('attendResult').textContent = '请求异常：' + e.message;
       }
+      submitting = false;
+      $('attendBtn').disabled = false;
+      $('attendBtn').textContent = '提交打卡';
     };
 
     // 初始渲染
