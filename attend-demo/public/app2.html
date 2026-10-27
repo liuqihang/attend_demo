@@ -47,7 +47,7 @@
     <!-- 地图选点 -->
     <div id="modeMap">
       <div id="map"></div>
-      <div class="map-tip">点击地图选点。蓝圈为圆心 500 米参考范围，坐标为 WGS84（OpenStreetMap 底图）。</div>
+      <div class="map-tip" id="mapTip">点击地图选点。蓝圈为圆心 500 米参考范围。底图为高德（GCJ-02），选出的坐标已自动转成 WGS84。</div>
     </div>
 
     <!-- 手动输入 -->
@@ -277,7 +277,7 @@
       r.onchange = () => {
         Object.values(MODES).forEach((id) => ($(id).style.display = 'none'));
         $(MODES[r.value]).style.display = 'block';
-        if (r.value === 'map') setTimeout(() => map.invalidateSize(), 60);
+        if (r.value === 'map' && map) setTimeout(() => map.invalidateSize(), 60);
       };
     });
 
@@ -294,24 +294,86 @@
       scheduleEncrypt();
     }
 
-    // ---- 地图选点（Leaflet + OSM 瓦片，坐标系 WGS84）----
-    const CENTER = [30.494585, 114.381391];
-    const map = L.map('map').setView(CENTER, 16);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '© OpenStreetMap contributors',
-    }).addTo(map);
-    L.circle(CENTER, { radius: 500, color: '#1677ff', fillOpacity: 0.08 }).addTo(map);
-    L.marker(CENTER).addTo(map).bindPopup('参考圆心');
+    // ---- 地图选点（Leaflet + 高德瓦片 GCJ-02；提交的坐标统一转成 WGS84）----
+    const CENTER = [30.494585, 114.381391];   // WGS84
 
-    let pickMarker = null;
-    map.on('click', (e) => {
-      const { lat, lng } = e.latlng;
-      if (pickMarker) map.removeLayer(pickMarker);
-      pickMarker = L.circleMarker([lat, lng], {
-        radius: 8, color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.75,
+    // WGS84 <-> GCJ-02（火星坐标）互转，标准算法
+    const GCJ = (() => {
+      const PI = Math.PI, A = 6378245.0, EE = 0.00669342162296594323;
+      const outOfChina = (lng, lat) => !(lng > 73.66 && lng < 135.05 && lat > 3.86 && lat < 53.55);
+      const tLat = (x, y) => {
+        let r = -100 + 2 * x + 3 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+        r += (20 * Math.sin(6 * x * PI) + 20 * Math.sin(2 * x * PI)) * 2 / 3;
+        r += (20 * Math.sin(y * PI) + 40 * Math.sin(y / 3 * PI)) * 2 / 3;
+        r += (160 * Math.sin(y / 12 * PI) + 320 * Math.sin(y * PI / 30)) * 2 / 3;
+        return r;
+      };
+      const tLng = (x, y) => {
+        let r = 300 + x + 2 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+        r += (20 * Math.sin(6 * x * PI) + 20 * Math.sin(2 * x * PI)) * 2 / 3;
+        r += (20 * Math.sin(x * PI) + 40 * Math.sin(x / 3 * PI)) * 2 / 3;
+        r += (150 * Math.sin(x / 12 * PI) + 300 * Math.sin(x / 30 * PI)) * 2 / 3;
+        return r;
+      };
+      function wgsToGcj(lat, lng) {
+        if (outOfChina(lng, lat)) return [lat, lng];
+        let dLat = tLat(lng - 105, lat - 35), dLng = tLng(lng - 105, lat - 35);
+        const radLat = lat / 180 * PI;
+        let magic = Math.sin(radLat);
+        magic = 1 - EE * magic * magic;
+        const sqrtMagic = Math.sqrt(magic);
+        dLat = (dLat * 180) / ((A * (1 - EE)) / (magic * sqrtMagic) * PI);
+        dLng = (dLng * 180) / (A / sqrtMagic * Math.cos(radLat) * PI);
+        return [lat + dLat, lng + dLng];
+      }
+      // 反向：用一次差值逼近，误差约 1 米
+      function gcjToWgs(lat, lng) {
+        if (outOfChina(lng, lat)) return [lat, lng];
+        const [gLat, gLng] = wgsToGcj(lat, lng);
+        return [lat * 2 - gLat, lng * 2 - gLng];
+      }
+      return { wgsToGcj, gcjToWgs };
+    })();
+
+    const centerGcj = GCJ.wgsToGcj(CENTER[0], CENTER[1]);
+    let map = null;
+
+    if (typeof L === 'undefined') {
+      // Leaflet（unpkg）拉不下来时兜底：不阻塞坐标选择与打卡
+      $('map').innerHTML = '<div class="map-fallback">地图组件加载失败（无法访问 unpkg.com）。<br>请改用「手动输入」或「坐标池随机」。</div>';
+      $('mapTip').classList.add('warn');
+      $('mapTip').textContent = '底图不可用，请切换到「手动输入」或「坐标池随机」。';
+      const off = document.querySelector('input[name=mode][value=offline]');
+      off.checked = true;
+      off.onchange();
+    } else {
+      map = L.map('map').setView(centerGcj, 16);
+      L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+        subdomains: '1234', maxZoom: 18, attribution: '© 高德地图',
       }).addTo(map);
-      setFinal(lat.toFixed(6), lng.toFixed(6));
-    });
+      L.circle(centerGcj, { radius: 500, color: '#1677ff', fillOpacity: 0.08 }).addTo(map);
+      L.marker(centerGcj).addTo(map).bindPopup('参考圆心');
+
+      // 瓦片持续加载失败时给出提示（而不是只留一片空白）
+      let tileErr = 0, tileWarned = false;
+      map.on('tileerror', () => {
+        if (tileWarned || ++tileErr < 4) return;
+        tileWarned = true;
+        $('mapTip').classList.add('warn');
+        $('mapTip').textContent = '底图加载失败（网络无法访问高德瓦片服务）。选点与坐标换算仍可用，也可改用「手动输入」。';
+      });
+
+      let pickMarker = null;
+      map.on('click', (e) => {
+        const { lat, lng } = e.latlng;              // 高德底图 → GCJ-02
+        if (pickMarker) map.removeLayer(pickMarker);
+        pickMarker = L.circleMarker([lat, lng], {
+          radius: 8, color: '#dc2626', fillColor: '#dc2626', fillOpacity: 0.75,
+        }).addTo(map);
+        const [wLat, wLng] = GCJ.gcjToWgs(lat, lng);  // 转回 WGS84 再使用
+        setFinal(wLat.toFixed(6), wLng.toFixed(6));
+      });
+    }
 
     // ---- 手动输入 ----
     $('offlineLat').oninput = $('offlineLng').oninput = () => {
